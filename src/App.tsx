@@ -1,10 +1,104 @@
 import React, { useState, useEffect } from 'react';
+import Markdown from 'react-markdown';
 import { Activity, TrendingUp, AlertCircle, RefreshCw, BarChart2, Clock, Layers, PieChart, List, Download, Rocket } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function MultibaggerCard({ stock }: { stock: any }) {
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    setError(null);
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        throw new Error("Missing GEMINI_API_KEY");
+      }
+      
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const prompt = `Can you briefly explain why the stock ${stock.symbol} in the Indian stock market has surged (multibagger / >100% return) over the last 52 weeks? Provide a short sentiment analysis (bullish/bearish/neutral sentiment in the market currently), the main reasons for the price action in bullet points, and cite your sources. Note: Make sure to keep the response concise (1-2 paragraphs max). Use markdown formatting.`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        tools: [{ googleSearch: {} }],
+        config: {
+           toolConfig: { includeServerSideToolInvocations: true }
+        }
+      });
+      
+      setAnalysis(response.text);
+    } catch (err: any) {
+      setError(err.message || "Failed to analyze");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 hover:border-emerald-500/30 transition-colors flex flex-col h-full">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold tracking-tight text-zinc-100">{stock.symbol.replace('.NS', '')}</h3>
+          {stock.companyName && (
+            <p className="text-xs text-zinc-500 mt-1 line-clamp-1">{stock.companyName}</p>
+          )}
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-sm text-zinc-600">CMP:</span>
+            <span className="font-mono text-zinc-300">₹{stock.currentClose.toFixed(2)}</span>
+          </div>
+        </div>
+        <div className="px-3 py-1 text-xs font-medium rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 whitespace-nowrap">
+          +{stock.percentChange.toFixed(1)}%
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-zinc-800/50 mb-6">
+        <div>
+          <p className="text-xs text-zinc-500 mb-1">Price 1 Year Ago</p>
+          <p className="font-mono font-medium text-zinc-400">
+            ₹{stock.yearAgoClose.toFixed(2)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 mb-1">52W High / Low</p>
+          <p className="font-mono font-medium text-zinc-400">
+            ₹{stock.high52.toFixed(1)} / ₹{stock.low52.toFixed(1)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-auto pt-4 border-t border-zinc-800/50">
+        {!analysis && !analyzing && !error && (
+            <button onClick={handleAnalyze} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-colors text-zinc-300">
+                <Activity className="w-4 h-4 text-emerald-500" /> Analyze Sentiment
+            </button>
+        )}
+        {analyzing && (
+            <div className="flex items-center justify-center gap-2 py-2.5 text-zinc-400 text-sm">
+                <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                Analyzing markets...
+            </div>
+        )}
+        {error && (
+            <div className="text-sm text-red-400 text-center py-2.5">{error}</div>
+        )}
+        {analysis && (
+            <div className="markdown-body bg-zinc-950 p-4 rounded-xl border border-zinc-800 h-64 overflow-y-auto text-sm">
+               <Markdown>{analysis}</Markdown>
+            </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -540,41 +634,7 @@ export default function App() {
                     </h3>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       {stocks.map((stock) => (
-                        <div 
-                          key={stock.symbol}
-                          className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 hover:border-emerald-500/30 transition-colors"
-                        >
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="text-lg font-semibold tracking-tight text-zinc-100">{stock.symbol.replace('.NS', '')}</h3>
-                              {stock.companyName && (
-                                <p className="text-xs text-zinc-500 mt-1 line-clamp-1">{stock.companyName}</p>
-                              )}
-                              <div className="flex items-center gap-2 mt-2">
-                                <span className="text-sm text-zinc-600">CMP:</span>
-                                <span className="font-mono text-zinc-300">₹{stock.currentClose.toFixed(2)}</span>
-                              </div>
-                            </div>
-                            <div className="px-3 py-1 text-xs font-medium rounded-full border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                              +{stock.percentChange.toFixed(1)}%
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-zinc-800/50">
-                            <div>
-                              <p className="text-xs text-zinc-500 mb-1">Price 1 Year Ago</p>
-                              <p className="font-mono font-medium text-zinc-400">
-                                ₹{stock.yearAgoClose.toFixed(2)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-zinc-500 mb-1">52W High / Low</p>
-                              <p className="font-mono font-medium text-zinc-400">
-                                ₹{stock.high52.toFixed(1)} / ₹{stock.low52.toFixed(1)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
+                         <MultibaggerCard key={stock.symbol} stock={stock} />
                       ))}
                     </div>
                   </div>

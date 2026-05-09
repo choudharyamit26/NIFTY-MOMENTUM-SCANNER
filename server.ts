@@ -4,12 +4,24 @@ import YahooFinance from "yahoo-finance2";
 import { SMA, RSI, MACD } from "technicalindicators";
 import { NIFTY_UNIVERSE } from "./src/data/stocks.js";
 import { STOCK_CATEGORIES, getCategoriesForStock } from "./src/data/categories.js";
+import { GoogleGenAI } from "@google/genai";
 
 const yahooFinance = new YahooFinance();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
+
+let aiClient: GoogleGenAI | null = null;
+function getAI() {
+  if (!aiClient) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY environment variable is required");
+    }
+    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return aiClient;
+}
 
 // Broad Market Universe (Large, Mid, Small, Micro/Thematic)
 const BROAD_MARKET_STOCKS = NIFTY_UNIVERSE;
@@ -452,6 +464,8 @@ app.get("/api/multibaggers-scan", async (req, res) => {
     res.end();
   }
 });
+
+
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
