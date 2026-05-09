@@ -1,0 +1,5 @@
+{
+  "name": "Nifty Momentum Scanner",
+  "description": "Scans Nifty 50 stocks for bullish momentum and resistance breakouts using end-of-day data.",
+  "requestFramePermissions": []
+}
