@@ -27,18 +27,18 @@ function getAI() {
 const BROAD_MARKET_STOCKS = NIFTY_UNIVERSE;
 
 const SECTORS = [
-  { symbol: "^CNXIT", name: "Information Technology" },
-  { symbol: "^NSEBANK", name: "Banking" },
-  { symbol: "^CNXFIN", name: "Financial Services (NBFCs)" },
-  { symbol: "^CNXAUTO", name: "Automobile" },
-  { symbol: "^CNXFMCG", name: "FMCG" },
-  { symbol: "^CNXMETAL", name: "Metals & Mining" },
-  { symbol: "^CNXPHARMA", name: "Pharmaceuticals" },
-  { symbol: "^CNXREALTY", name: "Real Estate" },
-  { symbol: "^CNXENERGY", name: "Energy (Oil & Gas)" },
-  { symbol: "^CNXPSE", name: "Public Sector (PSUs / Defence)" },
-  { symbol: "^CNXINFRA", name: "Infrastructure" },
-  { symbol: "^CRSLMD", name: "Midcap 50" },
+  { symbol: "^CNXIT", name: "Information Technology", constituents: ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "LTIM.NS", "TECHM.NS", "PERSISTENT.NS", "COFORGE.NS"] },
+  { symbol: "^NSEBANK", name: "Banking", constituents: ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS", "INDUSINDBK.NS", "PNB.NS", "BANKBARODA.NS"] },
+  { symbol: "^CNXFIN", name: "Financial Services (NBFCs)", constituents: ["BAJFINANCE.NS", "BAJAJFINSV.NS", "CHOLAFIN.NS", "MUTHOOTFIN.NS", "PFC.NS", "RECLTD.NS", "SHRIRAMFIN.NS"] },
+  { symbol: "^CNXAUTO", name: "Automobile", constituents: ["TATAMOTORS.NS", "M&M.NS", "MARUTI.NS", "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "TVSMOTOR.NS", "ASHOKLEY.NS", "EICHERMOT.NS"] },
+  { symbol: "^CNXFMCG", name: "FMCG", constituents: ["ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS", "DABUR.NS", "GODREJCP.NS", "MARICO.NS"] },
+  { symbol: "^CNXMETAL", name: "Metals & Mining", constituents: ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "COALINDIA.NS", "NMDC.NS", "SAIL.NS", "JINDALSTEL.NS"] },
+  { symbol: "^CNXPHARMA", name: "Pharmaceuticals", constituents: ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "DIVISLAB.NS", "LUPIN.NS", "AUROPHARMA.NS", "BIOCON.NS", "TORNTPHARM.NS"] },
+  { symbol: "^CNXREALTY", name: "Real Estate", constituents: ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS", "PHOENIXLTD.NS", "BRIGADE.NS", "SOBHA.NS", "LODHA.NS"] },
+  { symbol: "^CNXENERGY", name: "Energy (Oil & Gas)", constituents: ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS", "IOC.NS", "GAIL.NS", "TATAPOWER.NS"] },
+  { symbol: "^CNXPSE", name: "Public Sector (PSUs / Defence)", constituents: ["HAL.NS", "BEL.NS", "BDL.NS", "MAZDOCK.NS", "COCHINSHIP.NS", "IRCTC.NS", "RVNL.NS", "IRFC.NS"] },
+  { symbol: "^CNXINFRA", name: "Infrastructure", constituents: ["LT.NS", "GRINFRA.NS", "PNCINFRA.NS", "KNRCON.NS", "IRB.NS", "NCC.NS", "RITES.NS", "IRCON.NS"] },
+  { symbol: "^CRSLMD", name: "Midcap 50", constituents: ["PAYTM.NS", "ZOMATO.NS", "POLICYBZR.NS", "NYKAA.NS", "DELHIVERY.NS", "SUZLON.NS", "TRENT.NS", "IDEA.NS"] },
 ];
 
 // Helper to calculate technicals
@@ -125,16 +125,21 @@ app.get("/api/sectors", async (req, res) => {
     const promises = SECTORS.map(async (sector) => {
       try {
         const queryOptions = { period1, interval: "1d" as const };
-        const chartData = await yahooFinance.chart(sector.symbol, queryOptions);
+        const chartData = await Promise.race([
+          yahooFinance.chart(sector.symbol, queryOptions),
+          new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
+        ]);
         
-        const quotes = chartData.quotes.filter(q => q.close !== null);
+        const quotes = chartData.quotes.filter((q: any) => q.close !== null);
         if (quotes.length < 20) return null;
 
         const closes = quotes.map(q => q.close);
         const currentClose = closes[closes.length - 1];
+        const dayAgoClose = closes[Math.max(0, closes.length - 2)];
         const weekAgoClose = closes[Math.max(0, closes.length - 6)];
         const monthAgoClose = closes[Math.max(0, closes.length - 22)];
 
+        const dailyReturn = ((currentClose - dayAgoClose) / dayAgoClose) * 100;
         const weeklyReturn = ((currentClose - weekAgoClose) / weekAgoClose) * 100;
         const monthlyReturn = ((currentClose - monthAgoClose) / monthAgoClose) * 100;
 
@@ -160,14 +165,51 @@ app.get("/api/sectors", async (req, res) => {
         if (score >= 3) trend = 'Bullish / Trending Up';
         else if (score <= 1) trend = 'Bearish / Trending Down';
 
+        let topMoversDaily = [];
+        let topMoversWeekly = [];
+
+        if (sector.constituents) {
+          try {
+            const constituentPromises = sector.constituents.map(async (sym) => {
+              try {
+                 const cData = await Promise.race([
+                   yahooFinance.chart(sym, queryOptions),
+                   new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
+                 ]);
+                 const cQuotes = cData.quotes.filter((q: any) => q.close !== null);
+                 if (cQuotes.length < 6) return null;
+                 const cCloses = cQuotes.map((q: any) => q.close);
+                 const cCurrentClose = cCloses[cCloses.length - 1];
+                 const cDayAgoClose = cCloses[Math.max(0, cCloses.length - 2)];
+                 const cWeekAgoClose = cCloses[Math.max(0, cCloses.length - 6)];
+                 const cDailyReturn = ((cCurrentClose - cDayAgoClose) / cDayAgoClose) * 100;
+                 const cWeeklyReturn = ((cCurrentClose - cWeekAgoClose) / cWeekAgoClose) * 100;
+                 return { symbol: sym, dailyReturn: cDailyReturn, weeklyReturn: cWeeklyReturn, price: cCurrentClose };
+              } catch (err) {
+                 return null;
+              }
+            });
+            const constituentsData: any[] = (await Promise.all(constituentPromises)).filter(Boolean);
+            
+            topMoversDaily = [...constituentsData].sort((a, b) => b.dailyReturn - a.dailyReturn).slice(0, 3);
+            topMoversWeekly = [...constituentsData].sort((a, b) => b.weeklyReturn - a.weeklyReturn).slice(0, 3);
+          } catch (e) {
+             console.error("Error fetching constituents for sector:", sector.symbol, e);
+          }
+        }
+
         return {
           name: sector.name,
           symbol: sector.symbol,
+          price: currentClose,
+          dailyReturn: dailyReturn,
           weeklyReturn: weeklyReturn,
           monthlyReturn: monthlyReturn,
           rsi: currentRsi,
           trend,
-          score
+          score,
+          topMoversDaily,
+          topMoversWeekly
         };
       } catch (err: any) {
         if (err.message && (
@@ -218,8 +260,11 @@ app.get("/api/scan", async (req, res) => {
       const promises = chunk.map(async (symbol) => {
         try {
           const queryOptions = { period1, interval: "1d" as const };
-          const chartData = await yahooFinance.chart(symbol, queryOptions);
-          const historical = chartData.quotes.filter(q => q.close !== null && q.volume !== null);
+          const chartData = await Promise.race([
+            yahooFinance.chart(symbol, queryOptions),
+            new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
+          ]);
+          const historical = chartData.quotes.filter((q: any) => q.close !== null && q.volume !== null);
           
           if (!historical || historical.length === 0) return null;
 
@@ -319,9 +364,10 @@ app.get("/api/scan", async (req, res) => {
                stopLoss,
                targetPrice,
                reasoning,
-               score,
+               score: Math.min(10, score),
                signals,
                rsi: currentRsi,
+               volume: currentVolume,
                volumeMultiplier: (currentVolume / avgVol20).toFixed(2)
              };
           }
@@ -351,11 +397,8 @@ app.get("/api/scan", async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    // Sort by score descending, then by RSI descending
-    results.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.rsi - a.rsi;
-    });
+    // Sort by volume multiplier descending
+    results.sort((a, b) => parseFloat(b.volumeMultiplier) - parseFloat(a.volumeMultiplier));
 
     // Return top 20
     res.write(`data: ${JSON.stringify({ type: 'complete', data: results.slice(0, 20) })}\n\n`);
@@ -387,8 +430,11 @@ app.get("/api/multibaggers-scan", async (req, res) => {
       const promises = chunk.map(async (symbol) => {
         try {
           const queryOptions = { period1, interval: "1d" as const };
-          const chartData = await yahooFinance.chart(symbol, queryOptions);
-          const historical = chartData.quotes.filter(q => q.close !== null);
+          const chartData = await Promise.race([
+            yahooFinance.chart(symbol, queryOptions),
+            new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000))
+          ]);
+          const historical = chartData.quotes.filter((q: any) => q.close !== null);
           
           if (!historical || historical.length < 200) return null; // Ensure enough history for 52W
 

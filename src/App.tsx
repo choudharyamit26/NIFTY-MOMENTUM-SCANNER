@@ -418,7 +418,7 @@ export default function App() {
                       <BarChart2 className="w-5 h-5 text-emerald-400" />
                       Top 20 Breakout Candidates
                     </h2>
-                    <span className="text-sm text-zinc-500">Sorted by signal strength</span>
+                    <span className="text-sm text-zinc-500">Sorted by volume multiplier</span>
                   </div>
                   <button
                     onClick={exportToCSV}
@@ -459,12 +459,12 @@ export default function App() {
                           </div>
                         </div>
                         
-                        <div className="flex flex-col items-end gap-3 shrink-0">
-                          <div className="flex items-center gap-3 text-sm text-zinc-400">
-                            <span>Score: {stock.score}/10</span>
-                            <span className="w-1 h-1 rounded-full bg-zinc-700"></span>
-                            <span>Vol: {stock.volumeMultiplier}x</span>
-                          </div>
+                          <div className="flex flex-col items-end gap-3 shrink-0">
+                            <div className="flex items-center gap-3 text-sm text-zinc-400">
+                              <span>Vol: {(stock.volume / 1000000).toFixed(2)}M ({stock.volumeMultiplier}x)</span>
+                              <span className="w-1 h-1 rounded-full bg-zinc-700"></span>
+                              <span>Score: {stock.score}/10</span>
+                            </div>
                           <div className="flex flex-wrap gap-2 max-w-[240px] justify-end">
                             {stock.signals.map((signal: string, i: number) => (
                               <span 
@@ -533,7 +533,11 @@ export default function App() {
                       <div className="flex items-start justify-between mb-4">
                         <div>
                           <h3 className="text-lg font-semibold tracking-tight text-zinc-100">{sector.name}</h3>
-                          <p className="text-sm text-zinc-500 font-mono">{sector.symbol}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-zinc-500 font-mono">{sector.symbol}</p>
+                            <span className="w-1 h-1 rounded-full bg-zinc-700"></span>
+                            <span className="text-sm font-mono text-zinc-300 font-medium">₹{sector.price?.toFixed(2)}</span>
+                          </div>
                         </div>
                         <div className={cn(
                           "px-3 py-1 text-xs font-medium rounded-full border",
@@ -545,7 +549,13 @@ export default function App() {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-zinc-800/50">
+                      <div className="grid grid-cols-4 gap-4 mt-6 pt-4 border-t border-zinc-800/50">
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-1">1D Return</p>
+                          <p className={cn("font-mono font-medium", sector.dailyReturn >= 0 ? "text-emerald-400" : "text-red-400")}>
+                            {sector.dailyReturn >= 0 ? '+' : ''}{sector.dailyReturn.toFixed(2)}%
+                          </p>
+                        </div>
                         <div>
                           <p className="text-xs text-zinc-500 mb-1">1W Return</p>
                           <p className={cn("font-mono font-medium", sector.weeklyReturn >= 0 ? "text-emerald-400" : "text-red-400")}>
@@ -565,6 +575,41 @@ export default function App() {
                           </p>
                         </div>
                       </div>
+                      
+                      {(sector.topMoversDaily?.length > 0 || sector.topMoversWeekly?.length > 0) && (
+                        <div className="mt-6 pt-4 border-t border-zinc-800/50 grid grid-cols-2 gap-4">
+                          {sector.topMoversDaily?.length > 0 && (
+                            <div>
+                              <p className="text-xs text-zinc-500 mb-2 font-medium">Top 3 Movers (1D)</p>
+                              <div className="space-y-1">
+                                {sector.topMoversDaily.map((mover: any, i: number) => (
+                                  <div key={i} className="flex justify-between items-center text-sm">
+                                    <span className="text-zinc-300 font-mono text-xs">{mover.symbol.replace('.NS', '')} <span className="text-zinc-500 ml-1">₹{mover.price?.toFixed(2)}</span></span>
+                                    <span className={cn("font-mono text-xs", mover.dailyReturn >= 0 ? "text-emerald-400" : "text-red-400")}>
+                                      {mover.dailyReturn >= 0 ? '+' : ''}{mover.dailyReturn.toFixed(2)}%
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {sector.topMoversWeekly?.length > 0 && (
+                            <div>
+                              <p className="text-xs text-zinc-500 mb-2 font-medium">Top 3 Movers (1W)</p>
+                              <div className="space-y-1">
+                                {sector.topMoversWeekly.map((mover: any, i: number) => (
+                                  <div key={i} className="flex justify-between items-center text-sm">
+                                    <span className="text-zinc-300 font-mono text-xs">{mover.symbol.replace('.NS', '')} <span className="text-zinc-500 ml-1">₹{mover.price?.toFixed(2)}</span></span>
+                                    <span className={cn("font-mono text-xs", mover.weeklyReturn >= 0 ? "text-emerald-400" : "text-red-400")}>
+                                      {mover.weeklyReturn >= 0 ? '+' : ''}{mover.weeklyReturn.toFixed(2)}%
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
