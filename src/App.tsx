@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Markdown from 'react-markdown';
-import { Activity, TrendingUp, AlertCircle, RefreshCw, BarChart2, Clock, Layers, PieChart, List, Download, Rocket } from 'lucide-react';
+import { 
+  Activity, TrendingUp, AlertCircle, RefreshCw, BarChart2, Clock, 
+  Layers, PieChart, List, Download, Rocket, Newspaper, Scale, 
+  Sparkles, Users, ArrowRight 
+} from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { CouncilDebate, type DebateData } from './components/CouncilDebate.js';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,25 +22,17 @@ function MultibaggerCard({ stock }: { stock: any }) {
     setAnalyzing(true);
     setError(null);
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("Missing GEMINI_API_KEY");
-      }
-      
-      const { GoogleGenAI } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const prompt = `Can you briefly explain why the stock ${stock.symbol} in the Indian stock market has surged (multibagger / >100% return) over the last 52 weeks? Provide a short sentiment analysis (bullish/bearish/neutral sentiment in the market currently), the main reasons for the price action in bullet points, and cite your sources. Note: Make sure to keep the response concise (1-2 paragraphs max). Use markdown formatting.`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        tools: [{ googleSearch: {} }],
-        config: {
-           toolConfig: { includeServerSideToolInvocations: true }
-        }
+      const response = await fetch('/api/multibagger-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock })
       });
-      
-      setAnalysis(response.text);
+      const data = await response.json();
+      if (data.analysis) {
+        setAnalysis(data.analysis);
+      } else {
+        throw new Error(data.error || "Failed to analyze stock");
+      }
     } catch (err: any) {
       setError(err.message || "Failed to analyze");
     } finally {
@@ -102,9 +99,23 @@ function MultibaggerCard({ stock }: { stock: any }) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'stocks' | 'sectors' | 'universe' | 'multibaggers'>('stocks');
+  const [activeTab, setActiveTab] = useState<'stocks' | 'council' | 'sectors' | 'universe' | 'multibaggers' | 'news'>('stocks');
   const [stockUniverse, setStockUniverse] = useState<string[]>([]);
   
+  // Multi-Agent Council State
+  const [debateData, setDebateData] = useState<DebateData | null>(null);
+  const [debating, setDebating] = useState<boolean>(false);
+  const [debateError, setDebateError] = useState<string | null>(null);
+  const [selectedDebateStock, setSelectedDebateStock] = useState<any | null>(null);
+  const [customDebateSymbol, setCustomDebateSymbol] = useState<string>('');
+  const [debateRiskTolerance, setDebateRiskTolerance] = useState<'Conservative' | 'Balanced' | 'Aggressive'>('Balanced');
+
+  const [fetchingNews, setFetchingNews] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsItems, setNewsItems] = useState<any[]>([]);
+  const [newsQuery, setNewsQuery] = useState("");
+  const [newsFilter, setNewsFilter] = useState<'All' | 'Bullish' | 'Bearish'>('All');
+
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
   const [results, setResults] = useState<any[]>([]);
@@ -118,6 +129,78 @@ export default function App() {
   const [multibaggerResults, setMultibaggerResults] = useState<any[]>([]);
   const [multibaggerError, setMultibaggerError] = useState<string | null>(null);
   const [multibaggerProgress, setMultibaggerProgress] = useState({ current: 0, total: 0 });
+
+  const handleRunDebate = async (stockToDebate?: any, symbolToSearch?: string, risk?: string) => {
+    setDebating(true);
+    setDebateError(null);
+    
+    // Always use the symbol explicitly searched or currently in the input text box
+    const explicitSymbol = (symbolToSearch !== undefined ? symbolToSearch : customDebateSymbol)?.trim().toUpperCase();
+    const targetRisk = risk || debateRiskTolerance;
+
+    try {
+      const payload: any = { riskTolerance: targetRisk };
+
+      if (explicitSymbol) {
+        // User typed or selected a specific symbol in the input box!
+        const cleanExplicit = explicitSymbol.replace(/\.(NS|BO)$/i, '');
+        const matchingPassedStock = stockToDebate && (stockToDebate.symbol?.toUpperCase().replace(/\.(NS|BO)$/i, '') === cleanExplicit) ? stockToDebate : null;
+        const matchingSelectedStock = selectedDebateStock && (selectedDebateStock.symbol?.toUpperCase().replace(/\.(NS|BO)$/i, '') === cleanExplicit) ? selectedDebateStock : null;
+
+        if (matchingPassedStock) {
+          payload.stock = matchingPassedStock;
+        } else if (matchingSelectedStock) {
+          payload.stock = matchingSelectedStock;
+        } else {
+          // New stock requested by the user: send symbol so the backend fetches fresh technicals & telemetry
+          payload.symbol = explicitSymbol;
+        }
+      } else if (stockToDebate) {
+        payload.stock = stockToDebate;
+      } else if (selectedDebateStock) {
+        payload.stock = selectedDebateStock;
+      } else if (results.length > 0) {
+        payload.stock = results[0];
+      } else if (stockUniverse.length > 0) {
+        payload.symbol = stockUniverse[0];
+      } else {
+        payload.symbol = "TATASTEEL.NS";
+      }
+
+      const res = await fetch('/api/multiagent-debate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Council debate failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.debate) {
+        setDebateData(data.debate);
+        if (data.debate.stock) {
+          setSelectedDebateStock(data.debate.stock);
+          setCustomDebateSymbol(data.debate.stock.symbol);
+        }
+      } else {
+        throw new Error(data.error || "No debate output generated");
+      }
+    } catch (err: any) {
+      setDebateError(err.message || "Failed to convene council");
+    } finally {
+      setDebating(false);
+    }
+  };
+
+  const handleDebateFromCard = (stock: any) => {
+    setSelectedDebateStock(stock);
+    setCustomDebateSymbol(stock.symbol);
+    setActiveTab('council');
+    handleRunDebate(stock, stock.symbol, debateRiskTolerance);
+  };
 
   const groupedMultibaggers = React.useMemo(() => {
     const groups: Record<string, any[]> = {};
@@ -229,6 +312,54 @@ export default function App() {
       .catch(console.error);
   }, []);
 
+  const handleFetchNews = async (query?: string) => {
+    setFetchingNews(true);
+    setNewsError(null);
+    setNewsItems([]);
+
+    try {
+      let symbolsToFetch: string[] = [];
+      const searchQuery = query || newsQuery;
+      
+      if (searchQuery.trim()) {
+         // User provided a specific stock to search for
+         let sym = searchQuery.trim().toUpperCase();
+         if (!sym.endsWith('.NS') && !sym.endsWith('.BO')) {
+            sym += '.NS';
+         }
+         symbolsToFetch = [sym];
+      } else {
+        // Get top 5 positive and top 5 negative trending stocks from results
+        if (results && results.length > 0) {
+          // results are sorted by volume multiplier. Let's just pick top 5
+          symbolsToFetch = results.slice(0, 5).map(r => r.symbol);
+        } else if (sectorResults && sectorResults.length > 0) {
+          // Collect top movers from sectors
+          const allMovers = sectorResults.flatMap(s => [...(s.topMoversDaily || []), ...(s.topMoversWeekly || [])]);
+          allMovers.sort((a,b) => Math.abs(b.dailyReturn) - Math.abs(a.dailyReturn));
+          symbolsToFetch = Array.from(new Set(allMovers.map(m => m.symbol))).slice(0, 5);
+        }
+      }
+      
+      const response = await fetch('/api/market-news', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: symbolsToFetch })
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to fetch news");
+      }
+      
+      const data = await response.json();
+      setNewsItems(data.news || []);
+    } catch(err: any) {
+      setNewsError(err.message || "An error occurred");
+    } finally {
+      setFetchingNews(false);
+    }
+  };
+
   const exportToCSV = () => {
     if (results.length === 0) return;
 
@@ -293,6 +424,8 @@ export default function App() {
             <p className="text-zinc-400 max-w-xl">
               {activeTab === 'stocks' 
                 ? 'Scans Broad Market (Large, Mid, Small, Micro Caps) for bullish momentum and resistance breakouts.'
+                : activeTab === 'council'
+                ? 'Multi-Agent Council: 4 specialist AI analysts debate price action, valuation, traps, and flows before issuing a binding verdict.'
                 : activeTab === 'sectors'
                 ? 'Analyzes major market sectors to identify current trending and lagging segments.'
                 : activeTab === 'multibaggers'
@@ -306,34 +439,34 @@ export default function App() {
           </div>
           
           <button
-            onClick={activeTab === 'stocks' ? handleScan : activeTab === 'sectors' ? handleScanSectors : handleScanMultibaggers}
-            disabled={activeTab === 'stocks' ? scanning : activeTab === 'sectors' ? scanningSectors : scanningMultibaggers}
+            onClick={activeTab === 'stocks' ? handleScan : activeTab === 'sectors' ? handleScanSectors : activeTab === 'multibaggers' ? handleScanMultibaggers : () => handleRunDebate()}
+            disabled={activeTab === 'stocks' ? scanning : activeTab === 'sectors' ? scanningSectors : activeTab === 'multibaggers' ? scanningMultibaggers : debating}
             className={cn(
               "flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all",
               "bg-emerald-500 text-zinc-950 hover:bg-emerald-400 active:scale-95",
               "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-500 disabled:active:scale-100",
-              activeTab === 'universe' ? "hidden" : "flex"
+              activeTab === 'universe' || activeTab === 'news' ? "hidden" : "flex"
             )}
           >
-            {(activeTab === 'stocks' ? scanning : activeTab === 'sectors' ? scanningSectors : scanningMultibaggers) ? (
+            {(activeTab === 'stocks' ? scanning : activeTab === 'sectors' ? scanningSectors : activeTab === 'multibaggers' ? scanningMultibaggers : debating) ? (
               <>
                 <RefreshCw className="w-5 h-5 animate-spin" />
-                Scanning...
+                {activeTab === 'council' ? 'Council In Session...' : 'Scanning...'}
               </>
             ) : (
               <>
-                <TrendingUp className="w-5 h-5" />
-                Run Scan
+                {activeTab === 'council' ? <Sparkles className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
+                {activeTab === 'council' ? 'Convene Council' : 'Run Scan'}
               </>
             )}
           </button>
         </header>
 
-        <div className="flex items-center gap-2 mb-8 border-b border-zinc-800 pb-px">
+        <div className="flex items-center gap-2 mb-8 border-b border-zinc-800 pb-px overflow-x-auto">
           <button
             onClick={() => setActiveTab('stocks')}
             className={cn(
-              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors",
+              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
               activeTab === 'stocks' 
                 ? "border-emerald-500 text-emerald-400" 
                 : "border-transparent text-zinc-400 hover:text-zinc-300 hover:border-zinc-700"
@@ -343,9 +476,24 @@ export default function App() {
             Stock Scanner
           </button>
           <button
+            onClick={() => setActiveTab('council')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+              activeTab === 'council' 
+                ? "border-emerald-500 text-emerald-400" 
+                : "border-transparent text-zinc-400 hover:text-zinc-300 hover:border-zinc-700"
+            )}
+          >
+            <Scale className="w-4 h-4" />
+            <span>Multi-Agent Council</span>
+            <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
+              Debate
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab('sectors')}
             className={cn(
-              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors",
+              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
               activeTab === 'sectors' 
                 ? "border-emerald-500 text-emerald-400" 
                 : "border-transparent text-zinc-400 hover:text-zinc-300 hover:border-zinc-700"
@@ -377,6 +525,18 @@ export default function App() {
           >
             <List className="w-4 h-4" />
             Stock Universe
+          </button>
+          <button
+            onClick={() => { setActiveTab('news'); handleFetchNews(); }}
+            className={cn(
+              "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+              activeTab === 'news' 
+                ? "border-emerald-500 text-emerald-400" 
+                : "border-transparent text-zinc-400 hover:text-zinc-300 hover:border-zinc-700"
+            )}
+          >
+            <Newspaper className="w-4 h-4" />
+            Market News
           </button>
         </div>
 
@@ -477,6 +637,18 @@ export default function App() {
                           </div>
                         </div>
                       </div>
+
+                      <div className="mt-4 pt-3 border-t border-zinc-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <span className="text-xs text-zinc-500">Need expert debate before placing your order?</span>
+                        <button
+                          onClick={() => handleDebateFromCard(stock)}
+                          className="inline-flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 hover:border-emerald-500/40 text-xs font-medium transition-all group-hover:shadow-lg group-hover:shadow-emerald-500/5"
+                        >
+                          <Scale className="w-3.5 h-3.5" />
+                          <span>Debate Signal (AI Council)</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -493,6 +665,26 @@ export default function App() {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === 'council' && (
+          <CouncilDebate
+            debateData={debateData}
+            debating={debating}
+            debateError={debateError}
+            onRunDebate={handleRunDebate}
+            breakoutCandidates={results}
+            stockUniverse={stockUniverse}
+            selectedStock={selectedDebateStock}
+            onSelectStock={(stk) => {
+              setSelectedDebateStock(stk);
+              setCustomDebateSymbol(stk.symbol);
+            }}
+            customSymbol={customDebateSymbol}
+            setCustomSymbol={setCustomDebateSymbol}
+            riskTolerance={debateRiskTolerance}
+            setRiskTolerance={setDebateRiskTolerance}
+          />
         )}
 
         {activeTab === 'sectors' && (
@@ -721,6 +913,117 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'news' && (
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-zinc-800 pb-4 gap-4">
+              <h2 className="text-xl font-medium flex items-center gap-2">
+                <Newspaper className="w-5 h-5 text-emerald-400" />
+                Latest Market News
+              </h2>
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <select
+                  value={newsFilter}
+                  onChange={(e) => setNewsFilter(e.target.value as any)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50"
+                >
+                  <option value="All">All News</option>
+                  <option value="Bullish">Bullish</option>
+                  <option value="Bearish">Bearish</option>
+                  <option value="Neutral">Neutral</option>
+                </select>
+                <input 
+                  type="text" 
+                  placeholder="Enter stock symbol (e.g. RELIANCE)"
+                  value={newsQuery}
+                  onChange={(e) => setNewsQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleFetchNews()}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 flex-1 md:w-64"
+                />
+                <button 
+                  onClick={() => handleFetchNews()} 
+                  disabled={fetchingNews}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("w-4 h-4", fetchingNews && "animate-spin")} />
+                  Search / Refresh
+                </button>
+              </div>
+            </div>
+            
+            {newsError && (
+              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 text-red-400">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p>{newsError}</p>
+              </div>
+            )}
+            
+            {fetchingNews && newsItems.length === 0 ? (
+               <div className="min-h-[300px] flex items-center justify-center">
+                 <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+               </div>
+            ) : (() => {
+               const filteredNews = newsFilter === 'All' ? newsItems : newsItems.filter(item => item.sentiment === newsFilter);
+               return filteredNews.length > 0 ? (
+              <div className="grid gap-6">
+                {filteredNews.map((item, index) => (
+                  <a 
+                    key={item.uuid || index} 
+                    href={item.link} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block bg-zinc-900/50 border border-zinc-800 rounded-xl p-5 hover:border-emerald-500/30 transition-colors group"
+                  >
+                    <div className="flex flex-col md:flex-row gap-5">
+                       {item.thumbnail?.resolutions?.length > 0 && (
+                          <div className="shrink-0">
+                            <img 
+                              src={item.thumbnail.resolutions[0].url} 
+                              alt="thumbnail" 
+                              className="w-full md:w-32 h-32 md:h-24 object-cover rounded-lg"
+                            />
+                          </div>
+                       )}
+                       <div className="flex flex-col flex-1 justify-between">
+                         <div>
+                           <div className="flex flex-wrap items-center gap-3 mb-2">
+                             <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                               {item.publisher || "News"}
+                             </span>
+                             {item.sentiment && item.sentiment !== 'Neutral' && (
+                               <span className={cn(
+                                 "text-xs font-medium px-2 py-0.5 rounded-full border",
+                                 item.sentiment === 'Bullish' ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-red-400 bg-red-500/10 border-red-500/20"
+                               )}>
+                                 {item.sentiment}
+                               </span>
+                             )}
+                             <span className="text-xs text-zinc-500">
+                               {item.providerPublishTime ? new Date(item.providerPublishTime).toLocaleString() : ""}
+                             </span>
+                             {item.relatedSymbol && (
+                               <span className="text-xs font-mono text-zinc-400 border border-zinc-800 px-2 py-0.5 rounded">
+                                 {item.relatedSymbol.replace('.NS', '')}
+                               </span>
+                             )}
+                           </div>
+                           <h3 className="text-lg font-medium text-zinc-100 group-hover:text-emerald-400 transition-colors line-clamp-2">
+                             {item.title}
+                           </h3>
+                         </div>
+                       </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            ) : !fetchingNews && (
+               <div className="text-center py-12 text-zinc-500 border border-zinc-800/50 rounded-xl border-dashed">
+                 No news found matching your criteria. Try adjusting the filters or refreshing.
+               </div>
+            );
+            })()}
           </div>
         )}
       </div>
